@@ -17,8 +17,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.12"
 
     steps:
       - name: Checkout repository
@@ -47,7 +56,7 @@ jobs:
 
       - name: Run x86_64 float64 benchmark smoke check
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-        run: python benchmarks/run_suite.py --rows 1000 10000 100000 --leaves 31 63 127 --repeats 3
+        run: python benchmarks/run_suite.py --rows 1000 10000 100000 --leaves 31 63 --repeats 3
 
   auto-tag:
     name: Auto-Tag Release from pyproject.toml

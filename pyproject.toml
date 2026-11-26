@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "lgbm-boost"
-version = "0.1.2"
+version = "0.2.0"
 description = "High-throughput exact float64 SIMD batch inference engine for LightGBM models (V-QuickScorer & Tiled Branchless AVX2/AVX-512)"
 readme = "README.md"
 license = { text = "MIT" }
