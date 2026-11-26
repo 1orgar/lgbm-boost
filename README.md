@@ -65,6 +65,21 @@ Measured on a `1,000`-tree, `100`-feature binary classification ensemble (`5% Na
 pip install lgbm-boost
 ```
 
+### Oracle Linux 8 (`ol8`) & Oracle Linux 9 (`ol9`) (`x86_64` WHL & RPM)
+
+Pre-built `x86_64` wheels (`manylinux_2_28_x86_64` for OL8 / `manylinux_2_34_x86_64` for OL9, covering Python `3.9`, `3.10`, `3.11`, `3.12`, `3.13`) and native `.el8.x86_64.rpm` / `.el9.x86_64.rpm` packages are attached to every [GitHub Release](https://github.com/1orgar/lgbm-boost/releases) and stored under [`artifacts/`](artifacts/):
+
+```bash
+# Install via RPM on Oracle Linux 8 (python39, python3.11, or python3.12):
+sudo dnf install -y ./python3.12-lgbm-boost-0.1.1-1.el8.x86_64.rpm
+
+# Install via RPM on Oracle Linux 9 (default python3 [3.9], python3.11, or python3.12):
+sudo dnf install -y ./python3-lgbm-boost-0.1.1-1.el9.x86_64.rpm
+
+# Or install offline from pre-built x86_64 wheel:
+pip install ./lgbm_boost-0.1.1-cp312-cp312-manylinux_2_28_x86_64.whl
+```
+
 ### From GitHub / Source
 
 Requires a C++17 compiler (`g++`, `clang++`, or MSVC). `CMake`, `Ninja`, and `nanobind` are fetched automatically in an isolated build environment:

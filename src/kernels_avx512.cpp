@@ -29,6 +29,23 @@ inline float HorizontalMin256(__m256 v) noexcept {
     return _mm_cvtss_f32(m3);
 }
 
+// Portable AVX-512F/DQ helpers compatible with older GCC 8 on Oracle Linux 8 / RHEL 8
+inline __m512 Abs512(__m512 v) noexcept {
+    return _mm512_castsi512_ps(_mm512_and_epi32(_mm512_castps_si512(v), _mm512_set1_epi32(0x7FFFFFFF)));
+}
+
+inline float HorizontalMax512(__m512 v) noexcept {
+    const __m256 lo = _mm512_castps512_ps256(v);
+    const __m256 hi = _mm512_extractf32x8_ps(v, 1);
+    return HorizontalMax256(_mm256_max_ps(lo, hi));
+}
+
+inline float HorizontalMin512(__m512 v) noexcept {
+    const __m256 lo = _mm512_castps512_ps256(v);
+    const __m256 hi = _mm512_extractf32x8_ps(v, 1);
+    return HorizontalMin256(_mm256_min_ps(lo, hi));
+}
+
 // Hardware VPOPCNTDQ 16-lane 32-bit trailing zero count: tzcnt32(v) = 31 - lzcnt32(v & -v)
 inline __m512i Ctz32Avx512(__m512i v) noexcept {
     const __m512i lsb = _mm512_and_si512(v, _mm512_sub_epi32(_mm512_setzero_si512(), v));
@@ -141,20 +158,20 @@ void EvalQS32Block_Avx512(
             const __mmask16 nan_k = _mm512_cmp_ps_mask(vx, vx, _CMP_UNORD_Q);
             __mmask16 zero_k = 0;
             if (span.has_zero_missing) {
-                const __m512 abs_vx = _mm512_abs_ps(vx);
+                const __m512 abs_vx = Abs512(vx);
                 zero_k = _mm512_cmp_ps_mask(abs_vx, zero_eps, _CMP_LE_OQ);
             }
 
             const __mmask16 special_k = nan_k | zero_k;
             const __m512 vx_clean = special_k ? _mm512_mask_mov_ps(vx, special_k, neg_inf) : vx;
 
-            const float x_max = _mm512_reduce_max_ps(vx_clean);
+            const float x_max = HorizontalMax512(vx_clean);
             uint32_t idx = span.split_begin;
             const uint32_t idx_stop = idx + CountStrictlyLess512(thresholds + idx, span.split_end - idx, x_max);
 
             if (idx < idx_stop) {
                 if (special_k == 0) {
-                    const float x_min = _mm512_reduce_min_ps(vx_clean);
+                    const float x_min = HorizontalMin512(vx_clean);
                     const uint32_t idx_all = idx + CountStrictlyLess512(thresholds + idx, idx_stop - idx, x_min);
                     for (; idx < idx_all; ++idx) {
                         const uint16_t tid = tree_ids[idx];
@@ -404,7 +421,7 @@ void EvalCompactTrees_Avx512(
                 go_left0 |= _mm512_cmp_ps_mask(vx0, vx0, _CMP_UNORD_Q);
             }
             if (root.has_zero_missing()) {
-                const __mmask16 is_z0 = _mm512_cmp_ps_mask(_mm512_abs_ps(vx0), zero_eps, _CMP_LE_OQ);
+                const __mmask16 is_z0 = _mm512_cmp_ps_mask(Abs512(vx0), zero_eps, _CMP_LE_OQ);
                 if (root.zero_goes_left()) {
                     go_left0 |= is_z0;
                 } else {
@@ -443,7 +460,7 @@ void EvalCompactTrees_Avx512(
                 if (meta.has_zero_missing) {
                     const __mmask16 has_zm_k = _mm512_test_epi32_mask(v_ff, _mm512_set1_epi32(1 << 25));
                     const __mmask16 zm_left_k = _mm512_test_epi32_mask(v_ff, _mm512_set1_epi32(1 << 26));
-                    const __mmask16 is_zero_k = _mm512_cmp_ps_mask(_mm512_abs_ps(vx), zero_eps, _CMP_LE_OQ);
+                    const __mmask16 is_zero_k = _mm512_cmp_ps_mask(Abs512(vx), zero_eps, _CMP_LE_OQ);
                     const __mmask16 ovr = has_zm_k & is_zero_k;
                     go_left = (go_left & ~ovr) | (zm_left_k & ovr);
                 }

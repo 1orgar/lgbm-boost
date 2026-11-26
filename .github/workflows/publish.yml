@@ -1,4 +1,4 @@
-name: Publish to PyPI
+name: Publish to PyPI & GitHub Release
 
 on:
   push:
@@ -43,6 +43,48 @@ jobs:
           name: cibw-wheels-${{ matrix.os }}
           path: ./wheelhouse/*.whl
 
+  build_oracle_linux:
+    name: Build x86_64 RPM & WHL (${{ matrix.ol }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ol: ol8
+            image: oraclelinux:8
+          - ol: ol9
+            image: oraclelinux:9
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build and test x86_64 wheels & RPMs in ${{ matrix.image }}
+        run: |
+          mkdir -p out_${{ matrix.ol }}
+          docker run --rm \
+            -v "${PWD}:/workspace:ro" \
+            -v "${PWD}/out_${{ matrix.ol }}:/out" \
+            ${{ matrix.image }} \
+            bash /workspace/packaging/rpm/build_ol_packages.sh ${{ matrix.ol }} /workspace /out
+
+      - name: Upload Python 3.9 manylinux_2_28 wheel from OL8 for PyPI
+        if: matrix.ol == 'ol8'
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-ol8-cp39
+          path: out_ol8/wheels/*-cp39-cp39-manylinux_2_28_x86_64.whl
+
+      - name: Upload ${{ matrix.ol }} RPM and WHL artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: oracle-linux-${{ matrix.ol }}-x86_64
+          path: |
+            out_${{ matrix.ol }}/rpms/*.rpm
+            out_${{ matrix.ol }}/wheels/*.whl
+
   build_sdist:
     name: Build source distribution (sdist)
     runs-on: ubuntu-latest
@@ -63,10 +105,9 @@ jobs:
 
   publish_pypi:
     name: Publish wheels and sdist to PyPI
-    needs: [build_wheels, build_sdist]
+    needs: [build_wheels, build_oracle_linux, build_sdist]
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
-      (github.event_name == 'release' && github.event.action == 'published') ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: pypi
@@ -77,7 +118,7 @@ jobs:
       id-token: write
 
     steps:
-      - name: Download all built distributions
+      - name: Download PyPI distributions
         uses: actions/download-artifact@v8
         with:
           pattern: cibw-*
@@ -88,3 +129,43 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+
+  upload_github_release:
+    name: Attach WHL & OL8/OL9 RPM artifacts to GitHub Release
+    needs: [build_wheels, build_oracle_linux, build_sdist]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Download standard wheels and sdist
+        uses: actions/download-artifact@v8
+        with:
+          pattern: cibw-*
+          path: release_assets
+          merge-multiple: true
+
+      - name: Download Oracle Linux 8 & 9 RPMs and wheels
+        uses: actions/download-artifact@v8
+        with:
+          pattern: oracle-linux-*
+          path: ol_assets
+          merge-multiple: false
+
+      - name: Consolidate release assets and upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          find ol_assets -name "*.rpm" -exec cp -v {} release_assets/ \;
+          find ol_assets -name "*-manylinux_2_34_x86_64.whl" -exec cp -v {} release_assets/ \;
+          ls -lh release_assets/
+
+          if ! gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            gh release create "${TAG_NAME}" --title "${TAG_NAME}" --generate-notes
+          fi
+          gh release upload "${TAG_NAME}" release_assets/* --clobber

@@ -4,14 +4,14 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "lgbm-boost"
-version = "0.1.0"
+version = "0.1.1"
 description = "High-throughput SIMD batch inference engine for LightGBM models (V-QuickScorer & Tiled Branchless AVX2/AVX-512)"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
     { name = "Kirill Sholokhov" },
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 keywords = [
     "lightgbm",
     "gbdt",
@@ -33,6 +33,7 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Programming Language :: C++",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -40,7 +41,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "numpy>=1.24",
+    "numpy>=1.21",
 ]
 
 [project.urls]
@@ -70,6 +71,9 @@ sdist.include = [
     "src/**",
     "python/**",
     "fork_integration/**",
+]
+sdist.exclude = [
+    "artifacts/**",
 ]
 
 [tool.pytest.ini_options]
