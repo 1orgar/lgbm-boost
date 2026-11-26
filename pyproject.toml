@@ -1,11 +1,11 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+requires = ["scikit-build-core>=0.10"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "lgbm-boost"
 version = "0.1.2"
-description = "High-throughput SIMD batch inference engine for LightGBM models (V-QuickScorer & Tiled Branchless AVX2/AVX-512)"
+description = "High-throughput exact float64 SIMD batch inference engine for LightGBM models (V-QuickScorer & Tiled Branchless AVX2/AVX-512)"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
@@ -33,11 +33,7 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Programming Language :: C++",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
@@ -61,6 +57,7 @@ dev = [
 
 [tool.scikit-build]
 wheel.packages = ["python/lgbm_boost"]
+wheel.py-api = "py3"
 cmake.build-type = "Release"
 minimum-version = "build-system.requires"
 sdist.include = [
@@ -77,14 +74,17 @@ sdist.include = [
 testpaths = ["tests"]
 
 [tool.cibuildwheel]
-build = "cp310-* cp311-* cp312-* cp313-*"
-skip = "*-win32 *-*linux_i686"
+build = "cp312-*"
+skip = "*-win32 *-*linux_i686 *musllinux*"
 test-requires = ["pytest>=8.0", "numpy>=1.24"]
 test-command = "pytest {project}/tests/test_wheel_smoke.py -v"
 
 [tool.cibuildwheel.linux]
-manylinux-x86_64-image = "manylinux_2_28"
+manylinux-x86_64-image = "manylinux2014"
 manylinux-aarch64-image = "manylinux_2_28"
 
 [tool.cibuildwheel.macos]
 environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
+
+[tool.cibuildwheel.windows]
+repair-wheel-command = ""

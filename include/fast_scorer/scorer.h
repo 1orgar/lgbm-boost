@@ -41,23 +41,25 @@ public:
     int total_iterations() const noexcept { return model_.total_iterations; }
     int total_trees() const noexcept { return model_.total_trees; }
 
-    // Batch prediction for row-major float32 matrix: out_scores must have size n_rows * num_outputs()
+    // Batch prediction for row-major float32 matrix -> float64 or float32 output
     void PredictRowMajorF32(
         const float* data,
         size_t n_rows,
         size_t n_cols,
         ptrdiff_t row_stride_elems,
-        float* out_scores,
+        double* out_scores_f64,
+        float* out_scores_f32,
         const PredictOptions& opts = {}
     ) const;
 
-    // Batch prediction for row-major float64 matrix (streamed by L2 tiles without full matrix copy)
+    // Batch prediction for row-major float64 matrix -> float64 or float32 output
     void PredictRowMajorF64(
         const double* data,
         size_t n_rows,
         size_t n_cols,
         ptrdiff_t row_stride_elems,
-        float* out_scores,
+        double* out_scores_f64,
+        float* out_scores_f32,
         const PredictOptions& opts = {}
     ) const;
 
@@ -66,7 +68,8 @@ public:
         const ColumnView* columns,
         size_t n_rows,
         size_t n_cols,
-        float* out_scores,
+        double* out_scores_f64,
+        float* out_scores_f32,
         const PredictOptions& opts = {}
     ) const;
 
@@ -100,8 +103,8 @@ private:
 
     void ExecuteBatch(
         const InputDescriptor& input,
-        float* out_f32,
         double* out_f64,
+        float* out_f32,
         const PredictOptions& opts
     ) const;
 

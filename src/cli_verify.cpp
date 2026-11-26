@@ -24,13 +24,13 @@ fast_scorer::KernelKind ParseKernelCli(const std::string& s) {
     return fast_scorer::KernelKind::Auto;
 }
 
-std::vector<float> ReadFloatBin(const std::string& path, size_t count) {
+std::vector<double> ReadDoubleBin(const std::string& path, size_t count) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
         throw std::runtime_error("Cannot open binary file: " + path);
     }
-    std::vector<float> buf(count);
-    if (count > 0 && !ifs.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(count * sizeof(float)))) {
+    std::vector<double> buf(count);
+    if (count > 0 && !ifs.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(count * sizeof(double)))) {
         throw std::runtime_error("Short read on binary file: " + path);
     }
     return buf;
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     if (argc < 8) {
         std::fprintf(
             stderr,
-            "Usage: %s <model.txt> <X_f32.bin> <expected_f32.bin> <n_rows> <n_cols> <n_outputs> <raw_score:0|1> [isa] [kernel] [threads] [tol]\n",
+            "Usage: %s <model.txt> <X_f64.bin> <expected_f64.bin> <n_rows> <n_cols> <n_outputs> <raw_score:0|1> [isa] [kernel] [threads] [tol]\n",
             argv[0]
         );
         return 2;
@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
         const std::string isa_str = (argc >= 9) ? argv[8] : "auto";
         const std::string kernel_str = (argc >= 10) ? argv[9] : "auto";
         const int num_threads = (argc >= 11) ? std::stoi(argv[10]) : 0;
-        const float tol = (argc >= 12) ? std::stof(argv[11]) : 2e-5f;
+        const double tol = (argc >= 12) ? std::stod(argv[11]) : 1e-12;
 
         auto scorer = fast_scorer::FastEnsembleScorer::FromModelFile(model_path);
         if (!scorer.is_supported()) {
@@ -67,9 +67,9 @@ int main(int argc, char** argv) {
             return 3;
         }
 
-        const std::vector<float> X = ReadFloatBin(x_path, n_rows * n_cols);
-        const std::vector<float> expected = ReadFloatBin(exp_path, n_rows * n_outputs);
-        std::vector<float> actual(n_rows * n_outputs, 0.0f);
+        const std::vector<double> X = ReadDoubleBin(x_path, n_rows * n_cols);
+        const std::vector<double> expected = ReadDoubleBin(exp_path, n_rows * n_outputs);
+        std::vector<double> actual(n_rows * n_outputs, 0.0);
 
         fast_scorer::PredictOptions opts;
         opts.raw_score = raw_score;
@@ -78,23 +78,23 @@ int main(int argc, char** argv) {
         opts.num_threads = num_threads;
 
         // Warmup + timed run
-        scorer.PredictRowMajorF32(X.data(), n_rows, n_cols, static_cast<ptrdiff_t>(n_cols), actual.data(), opts);
+        scorer.PredictRowMajorF64(X.data(), n_rows, n_cols, static_cast<ptrdiff_t>(n_cols), actual.data(), nullptr, opts);
 
         const auto t0 = std::chrono::steady_clock::now();
         constexpr int kRepeats = 5;
         for (int r = 0; r < kRepeats; ++r) {
-            scorer.PredictRowMajorF32(X.data(), n_rows, n_cols, static_cast<ptrdiff_t>(n_cols), actual.data(), opts);
+            scorer.PredictRowMajorF64(X.data(), n_rows, n_cols, static_cast<ptrdiff_t>(n_cols), actual.data(), nullptr, opts);
         }
         const auto t1 = std::chrono::steady_clock::now();
         const double avg_ms = std::chrono::duration<double, std::milli>(t1 - t0).count() / kRepeats;
 
-        float max_abs_diff = 0.0f;
-        float max_rel_diff = 0.0f;
+        double max_abs_diff = 0.0;
+        double max_rel_diff = 0.0;
         size_t worst_idx = 0;
         for (size_t i = 0; i < actual.size(); ++i) {
-            const float diff = std::fabs(actual[i] - expected[i]);
-            const float denom = std::max(1.0f, std::fabs(expected[i]));
-            const float rel = diff / denom;
+            const double diff = std::fabs(actual[i] - expected[i]);
+            const double denom = std::max(1.0, std::fabs(expected[i]));
+            const double rel = diff / denom;
             if (diff > max_abs_diff) {
                 max_abs_diff = diff;
                 worst_idx = i;
@@ -119,7 +119,7 @@ int main(int argc, char** argv) {
         if (max_rel_diff > tol && max_abs_diff > tol) {
             std::fprintf(
                 stderr,
-                "FAIL: worst_idx=%zu actual=%.8f expected=%.8f max_abs_diff=%.3e max_rel_diff=%.3e > tol=%.3e\n",
+                "FAIL: worst_idx=%zu actual=%.16f expected=%.16f max_abs_diff=%.3e max_rel_diff=%.3e > tol=%.3e\n",
                 worst_idx,
                 actual[worst_idx],
                 expected[worst_idx],

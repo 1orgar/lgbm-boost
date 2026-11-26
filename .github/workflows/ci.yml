@@ -45,9 +45,9 @@ jobs:
       - name: Run pytest & Hypothesis test suite
         run: pytest -v
 
-      - name: Run x86_64 benchmark smoke check
+      - name: Run x86_64 float64 benchmark smoke check
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-        run: python benchmarks/run_suite.py --rows 1000 10000 100000 --leaves 31 63 --repeats 3
+        run: python benchmarks/run_suite.py --rows 1000 10000 100000 --leaves 31 63 127 --repeats 3
 
   auto-tag:
     name: Auto-Tag Release from pyproject.toml

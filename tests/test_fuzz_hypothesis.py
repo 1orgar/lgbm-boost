@@ -35,7 +35,7 @@ def test_hypothesis_random_models_and_inputs(
     rng = np.random.default_rng(seed)
 
     n_train = 160
-    X_train = rng.normal(scale=10.0, size=(n_train, n_cols)).astype(np.float32)
+    X_train = rng.normal(scale=10.0, size=(n_train, n_cols)).astype(np.float64)
     if use_missing and nan_prob > 0:
         X_train[rng.random(X_train.shape) < nan_prob] = np.nan
     if zero_prob > 0:
@@ -57,12 +57,12 @@ def test_hypothesis_random_models_and_inputs(
         params["num_class"] = 3
         y_train = rng.integers(0, 3, size=n_train)
     else:
-        y_train = rng.normal(size=n_train).astype(np.float32)
+        y_train = rng.normal(size=n_train).astype(np.float64)
 
     booster = lgb.train(params, lgb.Dataset(X_train, y_train), num_boost_round=n_rounds)
     fb = FastBooster(booster)
 
-    X_test = rng.normal(scale=12.0, size=(n_rows, n_cols)).astype(np.float32)
+    X_test = rng.normal(scale=12.0, size=(n_rows, n_cols)).astype(np.float64)
     if nan_prob > 0:
         X_test[rng.random(X_test.shape) < nan_prob] = np.nan
     if zero_prob > 0:
@@ -72,5 +72,7 @@ def test_hypothesis_random_models_and_inputs(
     pred_qs = fb.predict(X_test, kernel="quickscorer", num_threads=2)
     pred_ct = fb.predict(X_test, kernel="compact", num_threads=2)
 
-    np.testing.assert_allclose(pred_qs, ref, rtol=2e-5, atol=2e-5)
-    np.testing.assert_allclose(pred_ct, ref, rtol=2e-5, atol=2e-5)
+    assert pred_qs.dtype == np.float64
+    assert pred_ct.dtype == np.float64
+    np.testing.assert_allclose(pred_qs, ref, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(pred_ct, ref, rtol=1e-12, atol=1e-12)

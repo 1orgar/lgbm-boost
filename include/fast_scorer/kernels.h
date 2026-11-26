@@ -6,10 +6,13 @@
 
 namespace fast_scorer {
 
-// Fixed SIMD-friendly tile row capacity (multiple of 16 floats = 64B cache line, power of 2 = shift << 7)
+// Fixed SIMD-friendly tile row capacity (multiple of 16 doubles = two 64B cache lines, power of 2 = shift << 7)
 inline constexpr size_t kTileStride = 128;
 
-// Pack input rows [row_start, row_start + n_rows) into column-major tile buffer:
+// Exact LightGBM kZeroThreshold (include/LightGBM/meta.h: const double kZeroThreshold = 1e-35f)
+inline constexpr double kZeroThreshold = static_cast<double>(1e-35f);
+
+// Pack input rows [row_start, row_start + n_rows) into 64B-aligned column-major float64 tile buffer:
 // dst_col_major[f * kTileStride + r] for f in [0, n_features), r in [0, n_rows),
 // with zero-padding for r in [n_rows, padded_rows).
 void PackTileRowMajorF32_Scalar(
@@ -17,7 +20,7 @@ void PackTileRowMajorF32_Scalar(
     size_t n_rows,
     size_t n_features,
     ptrdiff_t row_stride_elems,
-    float* dst_col_major
+    double* dst_col_major
 ) noexcept;
 
 void PackTileRowMajorF64_Scalar(
@@ -25,7 +28,7 @@ void PackTileRowMajorF64_Scalar(
     size_t n_rows,
     size_t n_features,
     ptrdiff_t row_stride_elems,
-    float* dst_col_major
+    double* dst_col_major
 ) noexcept;
 
 void PackTileColumnar_Scalar(
@@ -33,16 +36,21 @@ void PackTileColumnar_Scalar(
     size_t row_start,
     size_t n_rows,
     size_t n_features,
-    float* dst_col_major
+    double* dst_col_major
 ) noexcept;
 
-// Discretize tile_col_major into 16-bit global bins once per 128-row tile using branchless monobound search.
-// Special sentinels: 0xFFFF = NaN, 0xFFFE = Zero (when feature_has_zero_missing[f] != 0).
-void BinTileFeatures_Scalar(
-    const CompiledModel& model,
-    const float* tile_col_major,
+// Exact float64 output finalization (scaling + Sigmoid / Softmax / Exp) writing directly
+// to out_f64 (default) or out_f32 (optional float32 output).
+void FinalizeTileOutput_Scalar(
+    double* tile_acc,
     size_t n_rows,
-    uint16_t* dst_tile_bins
+    int num_outputs,
+    ObjectiveType objective,
+    double sigmoid_alpha,
+    double scale_factor,
+    bool raw_score,
+    double* out_f64,
+    float* out_f32
 ) noexcept;
 
 struct KernelTable {
@@ -51,39 +59,38 @@ struct KernelTable {
 
     void (*eval_qs32_block)(
         const QS32Block& blk,
-        const float* tile_col_major,
-        const uint16_t* tile_bins,
+        const double* tile_col_major,
         size_t actual_rows,
-        float* tile_acc
+        double* tile_acc
     ) noexcept = nullptr;
 
     void (*eval_qs64_block)(
         const QS64Block& blk,
-        const float* tile_col_major,
-        const uint16_t* tile_bins,
+        const double* tile_col_major,
         size_t actual_rows,
-        float* tile_acc
+        double* tile_acc
     ) noexcept = nullptr;
 
     void (*eval_compact_trees)(
         const CompactTreeMeta* trees,
         size_t num_trees,
         const CompactNode* all_nodes,
-        const float* all_leaves,
-        const float* tile_col_major,
+        const double* all_leaves,
+        const double* tile_col_major,
         size_t n_rows,
-        float* tile_acc
+        double* tile_acc
     ) noexcept = nullptr;
 
     void (*finalize_tile_output)(
-        float* tile_acc,
+        double* tile_acc,
         size_t n_rows,
         int num_outputs,
         ObjectiveType objective,
-        float sigmoid_alpha,
-        float scale_factor,
+        double sigmoid_alpha,
+        double scale_factor,
         bool raw_score,
-        float* out_row_major
+        double* out_f64,
+        float* out_f32
     ) noexcept = nullptr;
 };
 

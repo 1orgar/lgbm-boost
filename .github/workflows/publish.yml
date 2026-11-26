@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  build_linux_x86_64_wheels:
-    name: Build Linux x86_64 wheels (OL8/OL9 manylinux2014 cp39-cp314)
+  build_linux_x86_64_wheel:
+    name: Build Linux x86_64 py3-none wheel (OL8/OL9 manylinux2014)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -19,7 +19,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build precompiled C++ x86_64 wheels (cp39-cp313) in manylinux2014 (glibc 2.17+)
+      - name: Build single Python-ABI-independent x86_64 wheel in manylinux2014 (glibc 2.17+)
         run: |
           mkdir -p wheelhouse
           docker run --rm \
@@ -28,27 +28,15 @@ jobs:
             quay.io/pypa/manylinux2014_x86_64:latest \
             bash -euxc '
               g++ --version
-              mkdir -p /tmp/src
+              mkdir -p /tmp/src /tmp/raw
               cp -a /workspace/CMakeLists.txt /workspace/LICENSE /workspace/README.md /workspace/pyproject.toml \
                     /workspace/include /workspace/src /workspace/python /workspace/tests /tmp/src/
-              for PY_DIR in /opt/python/cp39-cp39 /opt/python/cp310-cp310 /opt/python/cp311-cp311 /opt/python/cp312-cp312 /opt/python/cp313-cp313; do
-                if [[ -x "${PY_DIR}/bin/python" ]]; then
-                  mkdir -p /tmp/raw
-                  "${PY_DIR}/bin/pip" wheel /tmp/src --no-deps -w /tmp/raw
-                  auditwheel repair /tmp/raw/lgbm_boost-*.whl --plat manylinux2014_x86_64 -w /out
-                  rm -rf /tmp/raw
-                fi
-              done
+              /opt/python/cp312-cp312/bin/pip wheel /tmp/src --no-deps -w /tmp/raw
+              auditwheel repair /tmp/raw/lgbm_boost-*.whl --plat manylinux2014_x86_64 -w /out
               ls -lh /out
             '
 
-      - name: Build cp314 Linux x86_64 wheel with cibuildwheel
-        uses: pypa/cibuildwheel@v4.3.5
-        env:
-          CIBW_BUILD: "cp314-manylinux_x86_64"
-          CIBW_ARCHS: "x86_64"
-
-      - name: Verify zero-build binary wheel install on clean Oracle Linux 8 & 9 (no gcc/cmake)
+      - name: Verify single py3-none wheel across Python 3.9/3.11/3.12 on clean Oracle Linux 8 & 9
         run: |
           docker run --rm \
             -v "${PWD}/wheelhouse:/wheels:ro" \
@@ -74,14 +62,14 @@ jobs:
               done
             '
 
-      - name: Upload Linux x86_64 wheels
+      - name: Upload Linux x86_64 py3-none wheel
         uses: actions/upload-artifact@v7
         with:
           name: cibw-wheels-linux-x86_64
           path: ./wheelhouse/*manylinux*.whl
 
   build_wheels:
-    name: Build wheels (${{ matrix.os }})
+    name: Build py3-none wheel (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -100,7 +88,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build and test wheels with cibuildwheel
+      - name: Build and test py3-none wheel with cibuildwheel
         uses: pypa/cibuildwheel@v4.3.5
         env:
           CIBW_ARCHS: ${{ matrix.archs }}
@@ -131,7 +119,7 @@ jobs:
 
   publish_pypi:
     name: Publish wheels and sdist to PyPI
-    needs: [build_linux_x86_64_wheels, build_wheels, build_sdist]
+    needs: [build_linux_x86_64_wheel, build_wheels, build_sdist]
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch'
@@ -158,7 +146,7 @@ jobs:
 
   upload_github_release:
     name: Attach precompiled WHL & sdist to GitHub Release
-    needs: [build_linux_x86_64_wheels, build_wheels, build_sdist]
+    needs: [build_linux_x86_64_wheel, build_wheels, build_sdist]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

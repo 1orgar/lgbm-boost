@@ -11,7 +11,4 @@ struct CompileOptions {
 
 CompiledModel CompileModel(const RawModel& raw, const CompileOptions& opts = {});
 
-// Exposed for unit testing exact float64 -> float32 threshold lowering
-float LowerThresholdToFloat32(double t64) noexcept;
-
 } // namespace fast_scorer

@@ -29,22 +29,22 @@ namespace fast_scorer {
 
 namespace {
 
-// 64-byte aligned buffer for SIMD loads/stores without UB or unaligned traps
-class AlignedFloatBuffer {
+// 64-byte aligned double buffer for SIMD loads/stores without UB or unaligned traps
+class AlignedDoubleBuffer {
 public:
-    AlignedFloatBuffer() = default;
-    ~AlignedFloatBuffer() { Release(); }
+    AlignedDoubleBuffer() = default;
+    ~AlignedDoubleBuffer() { Release(); }
 
-    AlignedFloatBuffer(const AlignedFloatBuffer&) = delete;
-    AlignedFloatBuffer& operator=(const AlignedFloatBuffer&) = delete;
+    AlignedDoubleBuffer(const AlignedDoubleBuffer&) = delete;
+    AlignedDoubleBuffer& operator=(const AlignedDoubleBuffer&) = delete;
 
-    AlignedFloatBuffer(AlignedFloatBuffer&& other) noexcept
+    AlignedDoubleBuffer(AlignedDoubleBuffer&& other) noexcept
         : ptr_(other.ptr_), capacity_(other.capacity_) {
         other.ptr_ = nullptr;
         other.capacity_ = 0;
     }
 
-    AlignedFloatBuffer& operator=(AlignedFloatBuffer&& other) noexcept {
+    AlignedDoubleBuffer& operator=(AlignedDoubleBuffer&& other) noexcept {
         if (this != &other) {
             Release();
             ptr_ = other.ptr_;
@@ -55,10 +55,10 @@ public:
         return *this;
     }
 
-    void EnsureCapacity(size_t num_floats) {
-        if (num_floats <= capacity_) return;
+    void EnsureCapacity(size_t num_doubles) {
+        if (num_doubles <= capacity_) return;
         Release();
-        const size_t bytes = ((num_floats * sizeof(float) + 63u) & ~size_t(63u));
+        const size_t bytes = ((num_doubles * sizeof(double) + 63u) & ~size_t(63u));
 #if defined(_MSC_VER)
         void* p = _aligned_malloc(bytes, 64);
         if (!p) throw std::bad_alloc();
@@ -68,12 +68,12 @@ public:
             throw std::bad_alloc();
         }
 #endif
-        ptr_ = static_cast<float*>(p);
-        capacity_ = bytes / sizeof(float);
+        ptr_ = static_cast<double*>(p);
+        capacity_ = bytes / sizeof(double);
     }
 
-    float* data() noexcept { return ptr_; }
-    const float* data() const noexcept { return ptr_; }
+    double* data() noexcept { return ptr_; }
+    const double* data() const noexcept { return ptr_; }
 
 private:
     void Release() noexcept {
@@ -88,15 +88,13 @@ private:
         }
     }
 
-    float* ptr_ = nullptr;
+    double* ptr_ = nullptr;
     size_t capacity_ = 0;
 };
 
 struct ThreadScratch {
-    AlignedFloatBuffer tile_col_major;
-    AlignedFloatBuffer tile_bins_storage;
-    AlignedFloatBuffer tile_acc;
-    AlignedFloatBuffer tile_out_tmp; // Used only when caller requests double* output
+    AlignedDoubleBuffer tile_col_major;
+    AlignedDoubleBuffer tile_acc;
 };
 
 #if defined(FAST_SCORER_ARCH_X86_64)
@@ -146,8 +144,6 @@ struct CpuFeatures {
         const bool has_bmi1 = (ebx & (1u << 3)) != 0;
         avx2 = has_avx2 && has_bmi1;
 
-        // Note: on macOS Darwin x86_64, the kernel sets ZMM state on demand or bits [7:5] in XCR0;
-        // on Linux/Windows XCR0 bits [7:5] (0xE0) + [2:1] (0x06) = 0xE6 indicate ZMM state enabled.
         const bool zmm_ok = (xcr0 & 0xE6ULL) == 0xE6ULL;
         const bool has_512f = (ebx & (1u << 16)) != 0;
         const bool has_512dq = (ebx & (1u << 17)) != 0;
@@ -356,7 +352,8 @@ void FastEnsembleScorer::PredictRowMajorF32(
     size_t n_rows,
     size_t n_cols,
     ptrdiff_t row_stride_elems,
-    float* out_scores,
+    double* out_scores_f64,
+    float* out_scores_f32,
     const PredictOptions& opts
 ) const {
     InputDescriptor desc;
@@ -365,7 +362,7 @@ void FastEnsembleScorer::PredictRowMajorF32(
     desc.n_rows = n_rows;
     desc.n_cols = n_cols;
     desc.row_stride = row_stride_elems;
-    ExecuteBatch(desc, out_scores, nullptr, opts);
+    ExecuteBatch(desc, out_scores_f64, out_scores_f32, opts);
 }
 
 void FastEnsembleScorer::PredictRowMajorF64(
@@ -373,7 +370,8 @@ void FastEnsembleScorer::PredictRowMajorF64(
     size_t n_rows,
     size_t n_cols,
     ptrdiff_t row_stride_elems,
-    float* out_scores,
+    double* out_scores_f64,
+    float* out_scores_f32,
     const PredictOptions& opts
 ) const {
     InputDescriptor desc;
@@ -382,14 +380,15 @@ void FastEnsembleScorer::PredictRowMajorF64(
     desc.n_rows = n_rows;
     desc.n_cols = n_cols;
     desc.row_stride = row_stride_elems;
-    ExecuteBatch(desc, out_scores, nullptr, opts);
+    ExecuteBatch(desc, out_scores_f64, out_scores_f32, opts);
 }
 
 void FastEnsembleScorer::PredictColumnar(
     const ColumnView* columns,
     size_t n_rows,
     size_t n_cols,
-    float* out_scores,
+    double* out_scores_f64,
+    float* out_scores_f32,
     const PredictOptions& opts
 ) const {
     InputDescriptor desc;
@@ -397,7 +396,7 @@ void FastEnsembleScorer::PredictColumnar(
     desc.cols_ptr = columns;
     desc.n_rows = n_rows;
     desc.n_cols = n_cols;
-    ExecuteBatch(desc, out_scores, nullptr, opts);
+    ExecuteBatch(desc, out_scores_f64, out_scores_f32, opts);
 }
 
 void FastEnsembleScorer::PredictRowMajorToF64(
@@ -420,13 +419,13 @@ void FastEnsembleScorer::PredictRowMajorToF64(
     desc.n_rows = n_rows;
     desc.n_cols = n_cols;
     desc.row_stride = row_stride_elems;
-    ExecuteBatch(desc, nullptr, out_scores_f64, opts);
+    ExecuteBatch(desc, out_scores_f64, nullptr, opts);
 }
 
 void FastEnsembleScorer::ExecuteBatch(
     const InputDescriptor& input,
-    float* out_f32,
     double* out_f64,
+    float* out_f32,
     const PredictOptions& opts
 ) const {
     if (!model_.supported) {
@@ -455,23 +454,21 @@ void FastEnsembleScorer::ExecuteBatch(
 
     const bool is_full_range = (start_iter == 0 && end_iter == model_.total_iterations);
     const int active_iterations = std::max(0, end_iter - start_iter);
-    const float scale_factor = (!opts.raw_score && model_.average_output && active_iterations > 0)
-                                   ? (1.0f / static_cast<float>(active_iterations))
-                                   : 1.0f;
+    const double scale_factor = (!opts.raw_score && model_.average_output && active_iterations > 0)
+                                    ? (1.0 / static_cast<double>(active_iterations))
+                                    : 1.0;
 
     const KernelKind chosen_kernel = (opts.kernel == KernelKind::Auto)
                                          ? model_.default_kernel
                                          : opts.kernel;
 
     // Precompute base bias & compact slice range if partial iteration slice is requested
-    std::vector<float> init_bias(static_cast<size_t>(K), 0.0f);
+    std::vector<double> init_bias(static_cast<size_t>(K), 0.0);
     const CompactTreeMeta* compact_slice_ptr = nullptr;
     size_t compact_slice_len = 0;
 
     if (is_full_range) {
-        for (int c = 0; c < K; ++c) {
-            init_bias[c] = static_cast<float>(model_.full_base_bias[c]);
-        }
+        init_bias = model_.full_base_bias;
         if (chosen_kernel == KernelKind::CompactTree) {
             compact_slice_ptr = model_.all_compact_trees.data();
             compact_slice_len = model_.all_compact_trees.size();
@@ -483,14 +480,10 @@ void FastEnsembleScorer::ExecuteBatch(
         const uint32_t tree_begin = static_cast<uint32_t>(start_iter * K);
         const uint32_t tree_end = static_cast<uint32_t>(end_iter * K);
 
-        std::vector<double> bias_d(static_cast<size_t>(K), 0.0);
         for (const ConstantTreeEntry& ct : model_.constant_trees) {
             if (ct.global_tree_idx >= tree_begin && ct.global_tree_idx < tree_end) {
-                bias_d[ct.class_id] += static_cast<double>(ct.value);
+                init_bias[ct.class_id] += ct.value;
             }
-        }
-        for (int c = 0; c < K; ++c) {
-            init_bias[c] = static_cast<float>(bias_d[c]);
         }
 
         auto it_begin = std::lower_bound(
@@ -519,10 +512,10 @@ void FastEnsembleScorer::ExecuteBatch(
         scratch.tile_col_major.EnsureCapacity(n_features * kTileStride);
         scratch.tile_acc.EnsureCapacity(static_cast<size_t>(K) * kTileStride);
 
-        float* col_buf = scratch.tile_col_major.data();
-        float* acc_buf = scratch.tile_acc.data();
+        double* col_buf = scratch.tile_col_major.data();
+        double* acc_buf = scratch.tile_acc.data();
 
-        // 1. Stream and transpose/cast tile into L2-resident 64B-aligned column-major buffer
+        // 1. Stream and transpose/cast tile into L2-resident 64B-aligned column-major float64 buffer
         switch (input.kind) {
             case InputKind::RowMajorF32:
                 PackTileRowMajorF32_Scalar(
@@ -555,18 +548,17 @@ void FastEnsembleScorer::ExecuteBatch(
 
         // 2. Initialize class accumulators with constant-tree base bias
         for (int c = 0; c < K; ++c) {
-            float* c_acc = acc_buf + static_cast<size_t>(c) * kTileStride;
-            const float b = init_bias[c];
-            std::fill_n(c_acc, padded_rows, b);
+            double* c_acc = acc_buf + static_cast<size_t>(c) * kTileStride;
+            std::fill_n(c_acc, padded_rows, init_bias[c]);
         }
 
         // 3. Evaluate L1d-sized tree blocks across the tile
         if (run_qs) {
             for (const QS32Block& blk : model_.qs32_blocks) {
-                kernels.eval_qs32_block(blk, col_buf, nullptr, tile_rows, acc_buf);
+                kernels.eval_qs32_block(blk, col_buf, tile_rows, acc_buf);
             }
             for (const QS64Block& blk : model_.qs64_blocks) {
-                kernels.eval_qs64_block(blk, col_buf, nullptr, tile_rows, acc_buf);
+                kernels.eval_qs64_block(blk, col_buf, tile_rows, acc_buf);
             }
         }
 
@@ -582,38 +574,21 @@ void FastEnsembleScorer::ExecuteBatch(
             );
         }
 
-        // 4. Fused vectorized link function (Sigmoid / Softmax / Exp) + store
-        if (out_f32 != nullptr) {
-            float* dst = out_f32 + row_start * static_cast<size_t>(K);
-            kernels.finalize_tile_output(
-                acc_buf,
-                tile_rows,
-                K,
-                model_.objective,
-                model_.sigmoid_alpha,
-                scale_factor,
-                opts.raw_score,
-                dst
-            );
-        } else if (out_f64 != nullptr) {
-            scratch.tile_out_tmp.EnsureCapacity(kTileStride * static_cast<size_t>(K));
-            float* tmp = scratch.tile_out_tmp.data();
-            kernels.finalize_tile_output(
-                acc_buf,
-                tile_rows,
-                K,
-                model_.objective,
-                model_.sigmoid_alpha,
-                scale_factor,
-                opts.raw_score,
-                tmp
-            );
-            double* dst64 = out_f64 + row_start * static_cast<size_t>(K);
-            const size_t total_elems = tile_rows * static_cast<size_t>(K);
-            for (size_t i = 0; i < total_elems; ++i) {
-                dst64[i] = static_cast<double>(tmp[i]);
-            }
-        }
+        // 4. Exact float64 link function (Sigmoid / Softmax / Exp) + direct zero-copy store
+        const size_t elem_off = row_start * static_cast<size_t>(K);
+        double* dst64 = (out_f64 != nullptr) ? (out_f64 + elem_off) : nullptr;
+        float* dst32 = (out_f32 != nullptr) ? (out_f32 + elem_off) : nullptr;
+        kernels.finalize_tile_output(
+            acc_buf,
+            tile_rows,
+            K,
+            model_.objective,
+            model_.sigmoid_alpha,
+            scale_factor,
+            opts.raw_score,
+            dst64,
+            dst32
+        );
     };
 
     const size_t num_tiles = (input.n_rows + kTileStride - 1u) / kTileStride;

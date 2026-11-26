@@ -62,24 +62,32 @@ def test_wheel_standalone_binary_and_isa_consistency() -> None:
     assert fb.feature_names == ["f0", "f1", "f2", "f3"]
 
     rng = np.random.default_rng(42)
-    X = rng.normal(size=(257, 4)).astype(np.float32)
+    X = rng.normal(size=(257, 4)).astype(np.float64)
     X[0, 0] = np.nan
     X[1, 3] = 0.0
 
     p_auto = fb.predict(X, num_threads=2)
+    p_f32 = fb.predict(X, num_threads=2, dtype=np.float32)
     p_scalar_qs = fb.predict(X, isa="scalar", kernel="quickscorer", num_threads=1)
     p_scalar_ct = fb.predict(X, isa="scalar", kernel="compact", num_threads=1)
 
+    assert p_auto.dtype == np.float64
+    assert p_f32.dtype == np.float32
     assert p_auto.shape == (257,)
     assert np.all((p_auto > 0.0) & (p_auto < 1.0))
-    np.testing.assert_allclose(p_auto, p_scalar_qs, rtol=1e-6, atol=1e-6)
-    np.testing.assert_allclose(p_auto, p_scalar_ct, rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(p_auto, p_scalar_qs, rtol=1e-14, atol=1e-14)
+    np.testing.assert_allclose(p_auto, p_scalar_ct, rtol=1e-14, atol=1e-14)
+    np.testing.assert_allclose(p_f32, p_auto.astype(np.float32), rtol=1e-6, atol=1e-6)
 
     best = detect_best_isa()
     assert best in ("scalar", "avx2", "avx512")
     if is_isa_available("avx2"):
         p_avx2 = fb.predict(X, isa="avx2", kernel="quickscorer")
-        np.testing.assert_allclose(p_avx2, p_scalar_qs, rtol=1e-6, atol=1e-6)
+        p_avx2_ct = fb.predict(X, isa="avx2", kernel="compact")
+        np.testing.assert_allclose(p_avx2, p_scalar_qs, rtol=1e-14, atol=1e-14)
+        np.testing.assert_allclose(p_avx2_ct, p_scalar_ct, rtol=1e-14, atol=1e-14)
     if is_isa_available("avx512"):
         p_avx512 = fb.predict(X, isa="avx512", kernel="quickscorer")
-        np.testing.assert_allclose(p_avx512, p_scalar_qs, rtol=1e-6, atol=1e-6)
+        p_avx512_ct = fb.predict(X, isa="avx512", kernel="compact")
+        np.testing.assert_allclose(p_avx512, p_scalar_qs, rtol=1e-14, atol=1e-14)
+        np.testing.assert_allclose(p_avx512_ct, p_scalar_ct, rtol=1e-14, atol=1e-14)

@@ -8,6 +8,8 @@ __pycache__/
 .hypothesis/
 *.so
 *.dylib
+*.dll
 *.o
+wheelhouse/
 .DS_Store
 benchmarks/results/

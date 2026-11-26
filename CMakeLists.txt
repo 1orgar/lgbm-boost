@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-option(FAST_SCORER_BUILD_PYTHON "Build nanobind Python extension" ON)
+option(FAST_SCORER_BUILD_SHARED "Build pure C ABI shared library for Python ctypes / C FFI" ON)
 option(FAST_SCORER_BUILD_CPP_TESTS "Build standalone C++ tests/cli" OFF)
 option(FAST_SCORER_USE_OPENMP "Enable OpenMP instead of built-in C++17 ThreadPool" OFF)
 
@@ -76,22 +76,18 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(fast_scorer_core PUBLIC Threads::Threads)
 
-if(FAST_SCORER_BUILD_PYTHON)
-    find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
-    execute_process(
-        COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
-        OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE nanobind_ROOT
+if(FAST_SCORER_BUILD_SHARED)
+    add_library(lgbm_boost_c SHARED src/c_api.cpp)
+    target_link_libraries(lgbm_boost_c PRIVATE fast_scorer_core)
+    set_target_properties(lgbm_boost_c PROPERTIES
+        PREFIX "lib"
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
     )
-    find_package(nanobind CONFIG REQUIRED)
-
-    nanobind_add_module(
-        _lgbm_boost_ext
-        STABLE_ABI
-        NB_STATIC
-        python/bindings.cpp
+    install(TARGETS lgbm_boost_c
+        LIBRARY DESTINATION lgbm_boost
+        RUNTIME DESTINATION lgbm_boost
     )
-    target_link_libraries(_lgbm_boost_ext PRIVATE fast_scorer_core)
-    install(TARGETS _lgbm_boost_ext LIBRARY DESTINATION lgbm_boost)
 endif()
 
 if(FAST_SCORER_BUILD_CPP_TESTS)

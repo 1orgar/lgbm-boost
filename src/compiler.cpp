@@ -8,40 +8,11 @@
 
 namespace fast_scorer {
 
-float LowerThresholdToFloat32(double t64) noexcept {
-    if (std::isnan(t64)) {
-        return std::numeric_limits<float>::quiet_NaN();
-    }
-    if (std::isinf(t64)) {
-        return t64 > 0.0 ? std::numeric_limits<float>::infinity()
-                         : -std::numeric_limits<float>::infinity();
-    }
-    constexpr double kMaxF32 = static_cast<double>(std::numeric_limits<float>::max());
-    constexpr double kMinF32 = static_cast<double>(std::numeric_limits<float>::lowest());
-    if (t64 >= kMaxF32) {
-        // Any finite float32 x satisfies double(x) <= t64, while +inf does not (since t64 is finite)
-        return std::numeric_limits<float>::max();
-    }
-    if (t64 < kMinF32) {
-        // No finite float32 x satisfies double(x) <= t64, while -inf does
-        return -std::numeric_limits<float>::infinity();
-    }
-    float t32 = static_cast<float>(t64);
-    if (static_cast<double>(t32) > t64) {
-        t32 = std::nextafterf(t32, -std::numeric_limits<float>::infinity());
-    }
-    return t32;
-}
-
 namespace {
 
 inline bool EvalNaNGoesLeft(int8_t decision_type, double threshold) noexcept {
     const uint8_t missing_type = static_cast<uint8_t>((decision_type >> 2) & 3);
     const bool default_left = (decision_type & 2) != 0;
-    // LightGBM NumericalDecision:
-    // MissingType::None = 0, MissingType::Zero = 1, MissingType::NaN = 2
-    // If missing_type != NaN, NaN becomes 0.0f.
-    // Then if missing_type == Zero (IsZero(0.0) is true) or missing_type == NaN, returns default_left.
     if (missing_type == 1 || missing_type == 2) {
         return default_left;
     }
@@ -70,7 +41,7 @@ inline uint64_t MakeKeepMask64(int clear_start, int clear_count) noexcept {
 
 struct PreparedNode {
     uint32_t feature_idx = 0;
-    float threshold_f32 = 0.0f;
+    double threshold = 0.0;
     bool nan_goes_left = false;
     bool has_zero_missing = false;
     bool zero_goes_left = false;
@@ -82,11 +53,10 @@ struct PreparedTree {
     uint32_t global_tree_idx = 0;
     uint16_t class_id = 0;
     uint16_t num_leaves = 0;
-    std::vector<PreparedNode> nodes; // DFS order, size = num_leaves - 1
-    std::vector<float> dfs_leaves;   // DFS order, size = num_leaves
+    std::vector<PreparedNode> nodes;
+    std::vector<double> dfs_leaves;
 };
 
-// Recursively traverse RawTree in Left-to-Right DFS to assign contiguous leaf bit positions
 void BuildPreparedTreeDFS(
     const RawTree& raw,
     int raw_node,
@@ -120,7 +90,7 @@ void BuildPreparedTreeDFS(
 
     PreparedNode pn;
     pn.feature_idx = static_cast<uint32_t>(raw.split_feature[raw_node]);
-    pn.threshold_f32 = LowerThresholdToFloat32(t64);
+    pn.threshold = t64;
     pn.nan_goes_left = EvalNaNGoesLeft(dt, t64);
     pn.has_zero_missing = HasZeroMissingFlag(dt);
     pn.zero_goes_left = EvalZeroGoesLeft(dt, t64);
@@ -129,7 +99,6 @@ void BuildPreparedTreeDFS(
     out_nodes[cur_idx] = pn;
 }
 
-// Compile a single RawTree into BFS-ordered CompactNode array for spatial cache locality
 CompactTreeMeta AppendCompactTree(
     const RawTree& raw,
     uint32_t global_tree_idx,
@@ -147,7 +116,6 @@ CompactTreeMeta AppendCompactTree(
     meta.global_tree_idx = global_tree_idx;
     meta.has_zero_missing = false;
 
-    // BFS renumbering of internal nodes so top tree levels are contiguous in L1 cache
     std::vector<int32_t> raw_to_bfs(num_internal, -1);
     std::vector<int32_t> bfs_to_raw;
     bfs_to_raw.reserve(num_internal);
@@ -174,7 +142,6 @@ CompactTreeMeta AppendCompactTree(
         }
     }
 
-    // Reorder leaves in BFS discovery order as well
     std::vector<int32_t> orig_leaf_to_new(num_leaves, -1);
     int32_t next_leaf = 0;
 
@@ -201,7 +168,7 @@ CompactTreeMeta AppendCompactTree(
             int32_t ol = ~lc;
             if (orig_leaf_to_new[ol] < 0) {
                 orig_leaf_to_new[ol] = next_leaf++;
-                out.compact_leaves.push_back(static_cast<float>(raw.leaf_value[ol]));
+                out.compact_leaves.push_back(raw.leaf_value[ol]);
             }
             lc = ~orig_leaf_to_new[ol];
         }
@@ -213,13 +180,13 @@ CompactTreeMeta AppendCompactTree(
             int32_t ol = ~rc;
             if (orig_leaf_to_new[ol] < 0) {
                 orig_leaf_to_new[ol] = next_leaf++;
-                out.compact_leaves.push_back(static_cast<float>(raw.leaf_value[ol]));
+                out.compact_leaves.push_back(raw.leaf_value[ol]);
             }
             rc = ~orig_leaf_to_new[ol];
         }
 
         CompactNode cn;
-        cn.threshold = LowerThresholdToFloat32(t64);
+        cn.threshold = t64;
         cn.feature_and_flags = packed;
         cn.left_child = lc;
         cn.right_child = rc;
@@ -247,16 +214,15 @@ QS32Block BuildQS32Block(
         }
     }
     blk.single_class_id = common_class;
-    // Align leaf_stride to multiple of 4 for clean cache-line / SIMD behavior
     blk.leaf_stride = static_cast<uint32_t>((max_leaves + 3u) & ~3u);
     if (blk.leaf_stride > 32u) blk.leaf_stride = 32u;
 
     blk.tree_class_id.resize(blk.num_trees);
     blk.global_tree_ids.resize(blk.num_trees);
-    blk.leaf_values.assign(static_cast<size_t>(blk.num_trees) * blk.leaf_stride, 0.0f);
+    blk.leaf_values.assign(static_cast<size_t>(blk.num_trees) * blk.leaf_stride, 0.0);
 
     struct TempSplit {
-        float threshold;
+        double threshold;
         uint16_t tree_in_block;
         uint32_t mask;
     };
@@ -272,7 +238,6 @@ QS32Block BuildQS32Block(
         for (uint16_t l = 0; l < pt.num_leaves; ++l) {
             blk.leaf_values[static_cast<size_t>(t) * blk.leaf_stride + l] = pt.dfs_leaves[l];
         }
-
         for (const PreparedNode& pn : pt.nodes) {
             if (pn.has_zero_missing) {
                 feat_has_zero[pn.feature_idx] = true;
@@ -280,7 +245,6 @@ QS32Block BuildQS32Block(
         }
     }
 
-    // Second pass over nodes in block so feat_has_zero is completely known per feature
     for (uint32_t t = 0; t < blk.num_trees; ++t) {
         const PreparedTree& pt = trees[begin_idx + t];
         for (const PreparedNode& pn : pt.nodes) {
@@ -289,18 +253,16 @@ QS32Block BuildQS32Block(
                 MakeKeepMask64(pn.left_clear_start, pn.left_clear_count)
             );
             per_feat_splits[f].push_back(TempSplit{
-                pn.threshold_f32,
+                pn.threshold,
                 static_cast<uint16_t>(t),
                 mask32
             });
 
-            // If NaN goes RIGHT, we must clear left subtree bits via mask32
             if (!pn.nan_goes_left) {
                 per_feat_nan[f].push_back(QS32SpecialEntry{
                     static_cast<uint16_t>(t), 0, mask32
                 });
             }
-            // If feature has ANY zero-missing node in this block, precompute exact zero routing for ALL nodes on f
             if (feat_has_zero[f] && !pn.zero_goes_left) {
                 per_feat_zero[f].push_back(QS32SpecialEntry{
                     static_cast<uint16_t>(t), 0, mask32
@@ -318,7 +280,6 @@ QS32Block BuildQS32Block(
             return a.tree_in_block < b.tree_in_block;
         });
 
-        // Merge splits on the exact same tree and identical float32 threshold
         size_t write_pos = 0;
         for (size_t read_pos = 0; read_pos < sp.size(); ++read_pos) {
             if (write_pos > 0 &&
@@ -382,10 +343,10 @@ QS64Block BuildQS64Block(
 
     blk.tree_class_id.resize(blk.num_trees);
     blk.global_tree_ids.resize(blk.num_trees);
-    blk.leaf_values.assign(static_cast<size_t>(blk.num_trees) * blk.leaf_stride, 0.0f);
+    blk.leaf_values.assign(static_cast<size_t>(blk.num_trees) * blk.leaf_stride, 0.0);
 
     struct TempSplit64 {
-        float threshold;
+        double threshold;
         uint16_t tree_in_block;
         uint8_t which_half;
         uint32_t mask_lo;
@@ -417,15 +378,15 @@ QS64Block BuildQS64Block(
             const uint64_t mask64 = MakeKeepMask64(pn.left_clear_start, pn.left_clear_count);
             const uint32_t m_lo = static_cast<uint32_t>(mask64 & 0xFFFFFFFFULL);
             const uint32_t m_hi = static_cast<uint32_t>(mask64 >> 32);
-            uint8_t wh = 2; // both halves modified
+            uint8_t wh = 2;
             if (m_hi == 0xFFFFFFFFu) {
-                wh = 0; // only lo32 modified
+                wh = 0;
             } else if (m_lo == 0xFFFFFFFFu) {
-                wh = 1; // only hi32 modified
+                wh = 1;
             }
 
             per_feat_splits[f].push_back(TempSplit64{
-                pn.threshold_f32,
+                pn.threshold,
                 static_cast<uint16_t>(t),
                 wh,
                 m_lo,
@@ -453,6 +414,26 @@ QS64Block BuildQS64Block(
             if (a.threshold != b.threshold) return a.threshold < b.threshold;
             return a.tree_in_block < b.tree_in_block;
         });
+
+        size_t write_pos = 0;
+        for (size_t read_pos = 0; read_pos < sp.size(); ++read_pos) {
+            if (write_pos > 0 &&
+                sp[write_pos - 1].threshold == sp[read_pos].threshold &&
+                sp[write_pos - 1].tree_in_block == sp[read_pos].tree_in_block) {
+                sp[write_pos - 1].mask_lo &= sp[read_pos].mask_lo;
+                sp[write_pos - 1].mask_hi &= sp[read_pos].mask_hi;
+                if (sp[write_pos - 1].mask_hi == 0xFFFFFFFFu) {
+                    sp[write_pos - 1].which_half = 0;
+                } else if (sp[write_pos - 1].mask_lo == 0xFFFFFFFFu) {
+                    sp[write_pos - 1].which_half = 1;
+                } else {
+                    sp[write_pos - 1].which_half = 2;
+                }
+            } else {
+                sp[write_pos++] = sp[read_pos];
+            }
+        }
+        sp.resize(write_pos);
 
         QS64FeatureSpan span;
         span.feature_idx = static_cast<uint32_t>(f);
@@ -500,7 +481,7 @@ CompiledModel CompileModel(const RawModel& raw, const CompileOptions& opts) {
 
     if (raw.has_categorical) {
         out.supported = false;
-        out.unsupported_reason = "Categorical splits are not supported in fast_scorer MVP";
+        out.unsupported_reason = "Categorical splits are not supported in fast_scorer";
         return out;
     }
     if (raw.has_linear) {
@@ -527,16 +508,15 @@ CompiledModel CompileModel(const RawModel& raw, const CompileOptions& opts) {
             out.max_num_leaves = rt.num_leaves;
         }
 
-        if (rt.num_leaves <= 0) {
-            continue;
-        }
+        if (rt.num_leaves <= 0) continue;
+
         if (rt.num_leaves == 1) {
             const double val = rt.leaf_value.empty() ? 0.0 : rt.leaf_value[0];
             out.full_base_bias[class_id] += val;
             out.constant_trees.push_back(ConstantTreeEntry{
                 static_cast<uint32_t>(t),
                 class_id,
-                static_cast<float>(val)
+                val
             });
             continue;
         }
@@ -547,8 +527,6 @@ CompiledModel CompileModel(const RawModel& raw, const CompileOptions& opts) {
             return out;
         }
 
-        // Always build CompactTree representation (small memory footprint, used for partial slices,
-        // deep trees > 64 leaves, and KernelKind::CompactTree mode)
         CompactTreeMeta cmeta = AppendCompactTree(rt, static_cast<uint32_t>(t), class_id, out);
         out.all_compact_trees.push_back(cmeta);
 
@@ -557,7 +535,6 @@ CompiledModel CompileModel(const RawModel& raw, const CompileOptions& opts) {
             continue;
         }
 
-        // Build DFS-renumbered PreparedTree for V-QuickScorer
         PreparedTree pt;
         pt.global_tree_idx = static_cast<uint32_t>(t);
         pt.class_id = class_id;
@@ -572,7 +549,7 @@ CompiledModel CompileModel(const RawModel& raw, const CompileOptions& opts) {
         for (int orig_l = 0; orig_l < rt.num_leaves; ++orig_l) {
             int dfs_l = orig_leaf_to_dfs[orig_l];
             if (dfs_l >= 0 && dfs_l < rt.num_leaves) {
-                pt.dfs_leaves[dfs_l] = static_cast<float>(rt.leaf_value[orig_l]);
+                pt.dfs_leaves[dfs_l] = rt.leaf_value[orig_l];
             }
         }
 
@@ -583,7 +560,6 @@ CompiledModel CompileModel(const RawModel& raw, const CompileOptions& opts) {
         }
     }
 
-    // Group QuickScorer trees by class_id first so multiclass blocks accumulate into a single class register!
     auto by_class_then_idx = [](const PreparedTree& a, const PreparedTree& b) {
         if (a.class_id != b.class_id) return a.class_id < b.class_id;
         return a.global_tree_idx < b.global_tree_idx;
@@ -591,108 +567,18 @@ CompiledModel CompileModel(const RawModel& raw, const CompileOptions& opts) {
     std::sort(qs32_candidates.begin(), qs32_candidates.end(), by_class_then_idx);
     std::sort(qs64_candidates.begin(), qs64_candidates.end(), by_class_then_idx);
 
-    const size_t b32 = std::max<uint32_t>(1u, opts.qs32_block_trees);
+    const size_t b32 = std::clamp<uint32_t>(opts.qs32_block_trees, 1u, 128u);
     for (size_t i = 0; i < qs32_candidates.size(); i += b32) {
         size_t end = std::min(qs32_candidates.size(), i + b32);
         out.qs32_blocks.push_back(BuildQS32Block(qs32_candidates, i, end, out.num_features));
     }
 
-    const size_t b64 = std::max<uint32_t>(1u, opts.qs64_block_trees);
+    const size_t b64 = std::clamp<uint32_t>(opts.qs64_block_trees, 1u, 64u);
     for (size_t i = 0; i < qs64_candidates.size(); i += b64) {
         size_t end = std::min(qs64_candidates.size(), i + b64);
         out.qs64_blocks.push_back(BuildQS64Block(qs64_candidates, i, end, out.num_features));
     }
 
-    // Build ensemble-wide pre-binning tables when QuickScorer has >= 16 trees
-    const size_t total_qs_trees = qs32_candidates.size() + qs64_candidates.size();
-    if (total_qs_trees >= 16) {
-        std::vector<std::vector<float>> uniq_per_feat(out.num_features);
-        out.feature_has_zero_missing.assign(static_cast<size_t>(out.num_features), 0);
-
-        for (const QS32Block& blk : out.qs32_blocks) {
-            for (const QS32FeatureSpan& sp : blk.features) {
-                if (sp.has_zero_missing) out.feature_has_zero_missing[sp.feature_idx] = 1;
-                auto& vec = uniq_per_feat[sp.feature_idx];
-                vec.insert(
-                    vec.end(),
-                    blk.thresholds.begin() + sp.split_begin,
-                    blk.thresholds.begin() + sp.split_end
-                );
-            }
-        }
-        for (const QS64Block& blk : out.qs64_blocks) {
-            for (const QS64FeatureSpan& sp : blk.features) {
-                if (sp.has_zero_missing) out.feature_has_zero_missing[sp.feature_idx] = 1;
-                auto& vec = uniq_per_feat[sp.feature_idx];
-                vec.insert(
-                    vec.end(),
-                    blk.thresholds.begin() + sp.split_begin,
-                    blk.thresholds.begin() + sp.split_end
-                );
-            }
-        }
-
-        bool can_prebin = true;
-        out.feature_bin_starts.resize(static_cast<size_t>(out.num_features) + 1, 0);
-        for (int f = 0; f < out.num_features; ++f) {
-            auto& vec = uniq_per_feat[f];
-            if (!vec.empty()) {
-                std::sort(vec.begin(), vec.end());
-                vec.erase(std::unique(vec.begin(), vec.end()), vec.end());
-                if (vec.size() > 65533u || std::isnan(vec.back())) {
-                    can_prebin = false;
-                    break;
-                }
-            }
-        }
-
-        if (can_prebin) {
-            out.use_prebinning = true;
-            for (int f = 0; f < out.num_features; ++f) {
-                out.feature_bin_starts[f] = static_cast<uint32_t>(out.shared_bin_thresholds.size());
-                const auto& vec = uniq_per_feat[f];
-                out.shared_bin_thresholds.insert(out.shared_bin_thresholds.end(), vec.begin(), vec.end());
-            }
-            out.feature_bin_starts[out.num_features] = static_cast<uint32_t>(out.shared_bin_thresholds.size());
-
-            // Populate block-local jump tables mapping global bin b in [0..U_f] -> split index
-            for (QS32Block& blk : out.qs32_blocks) {
-                for (QS32FeatureSpan& sp : blk.features) {
-                    const auto& uvec = uniq_per_feat[sp.feature_idx];
-                    sp.bin_offset_start = static_cast<uint32_t>(blk.bin_offsets.size());
-                    const auto th_beg = blk.thresholds.begin() + sp.split_begin;
-                    const auto th_end = blk.thresholds.begin() + sp.split_end;
-                    for (size_t b = 0; b < uvec.size(); ++b) {
-                        auto it = std::lower_bound(th_beg, th_end, uvec[b]);
-                        blk.bin_offsets.push_back(
-                            static_cast<uint16_t>(std::distance(blk.thresholds.begin(), it))
-                        );
-                    }
-                    blk.bin_offsets.push_back(static_cast<uint16_t>(sp.split_end));
-                }
-            }
-
-            for (QS64Block& blk : out.qs64_blocks) {
-                for (QS64FeatureSpan& sp : blk.features) {
-                    const auto& uvec = uniq_per_feat[sp.feature_idx];
-                    sp.bin_offset_start = static_cast<uint32_t>(blk.bin_offsets.size());
-                    const auto th_beg = blk.thresholds.begin() + sp.split_begin;
-                    const auto th_end = blk.thresholds.begin() + sp.split_end;
-                    for (size_t b = 0; b < uvec.size(); ++b) {
-                        auto it = std::lower_bound(th_beg, th_end, uvec[b]);
-                        blk.bin_offsets.push_back(
-                            static_cast<uint16_t>(std::distance(blk.thresholds.begin(), it))
-                        );
-                    }
-                    blk.bin_offsets.push_back(static_cast<uint16_t>(sp.split_end));
-                }
-            }
-        }
-    }
-
-    // Heuristic kernel selection:
-    // If all non-constant trees exceed 64 leaves, use CompactTree directly;
-    // otherwise QuickScorer (with deep_compact_trees hybrid tail if mixed) is primary.
     if (out.qs32_blocks.empty() && out.qs64_blocks.empty()) {
         out.default_kernel = KernelKind::CompactTree;
     } else {

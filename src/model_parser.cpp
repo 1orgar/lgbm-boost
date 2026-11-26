@@ -87,7 +87,7 @@ void ParseObjectiveConfig(std::string_view val, RawModel& model) {
         name == "cross_entropy_lambda" || name == "xentlambda" || name == "multiclassova" ||
         name == "multiclass_ova" || name == "ova" || name == "ovr") {
         model.objective = ObjectiveType::BinaryLogloss;
-        model.sigmoid_alpha = 1.0f;
+        model.sigmoid_alpha = 1.0;
     } else if (name == "multiclass" || name == "softmax") {
         model.objective = ObjectiveType::MulticlassSoftmax;
     } else if (name == "poisson" || name == "gamma" || name == "tweedie") {
@@ -99,7 +99,7 @@ void ParseObjectiveConfig(std::string_view val, RawModel& model) {
     for (size_t i = 1; i < tokens.size(); ++i) {
         const std::string& tok = tokens[i];
         if (tok.rfind("sigmoid:", 0) == 0) {
-            model.sigmoid_alpha = std::stof(tok.substr(8));
+            model.sigmoid_alpha = std::stod(tok.substr(8));
         }
     }
 }
