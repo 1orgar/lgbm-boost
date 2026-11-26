@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "lgbm-boost"
-version = "0.1.1"
+version = "0.1.2"
 description = "High-throughput SIMD batch inference engine for LightGBM models (V-QuickScorer & Tiled Branchless AVX2/AVX-512)"
 readme = "README.md"
 license = { text = "MIT" }
@@ -71,9 +71,6 @@ sdist.include = [
     "src/**",
     "python/**",
     "fork_integration/**",
-]
-sdist.exclude = [
-    "artifacts/**",
 ]
 
 [tool.pytest.ini_options]

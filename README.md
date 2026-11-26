@@ -59,25 +59,17 @@ Measured on a `1,000`-tree, `100`-feature binary classification ensemble (`5% Na
 
 ## Installation
 
-### From PyPI
+### From PyPI (Precompiled Binary Wheels — No Compiler Needed)
+
+Precompiled C++ SIMD wheels (`AVX-512` + `AVX2` + `Scalar` with runtime CPUID dispatch) are published to **PyPI** and attached directly to **[GitHub Releases](https://github.com/1orgar/lgbm-boost/releases)** for:
+- **Linux `x86_64`** (`manylinux_2_17_x86_64.manylinux2014_x86_64` — compatible out-of-the-box with **Oracle Linux 8 (`ol8`)**, **Oracle Linux 9 (`ol9`)**, RHEL/Alma/Rocky 8 & 9, Debian, and Ubuntu across Python `3.9`–`3.14`, even with older system `pip`)
+- **Linux `aarch64`**, **macOS (`arm64` & `x86_64`)**, and **Windows (`AMD64`)**
 
 ```bash
 pip install lgbm-boost
-```
 
-### Oracle Linux 8 (`ol8`) & Oracle Linux 9 (`ol9`) (`x86_64` WHL & RPM)
-
-Pre-built `x86_64` wheels (`manylinux_2_28_x86_64` for OL8 / `manylinux_2_34_x86_64` for OL9, covering Python `3.9`, `3.10`, `3.11`, `3.12`, `3.13`) and native `.el8.x86_64.rpm` / `.el9.x86_64.rpm` packages are attached to every [GitHub Release](https://github.com/1orgar/lgbm-boost/releases) and stored under [`artifacts/`](artifacts/):
-
-```bash
-# Install via RPM on Oracle Linux 8 (python39, python3.11, or python3.12):
-sudo dnf install -y ./python3.12-lgbm-boost-0.1.1-1.el8.x86_64.rpm
-
-# Install via RPM on Oracle Linux 9 (default python3 [3.9], python3.11, or python3.12):
-sudo dnf install -y ./python3-lgbm-boost-0.1.1-1.el9.x86_64.rpm
-
-# Or install offline from pre-built x86_64 wheel:
-pip install ./lgbm_boost-0.1.1-cp312-cp312-manylinux_2_28_x86_64.whl
+# Or install directly from a GitHub Release .whl on air-gapped OL8 / OL9 servers without building:
+pip install --only-binary=:all: ./lgbm_boost-0.1.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 ```
 
 ### From GitHub / Source

@@ -10,6 +10,76 @@ permissions:
   contents: read
 
 jobs:
+  build_linux_x86_64_wheels:
+    name: Build Linux x86_64 wheels (OL8/OL9 manylinux2014 cp39-cp314)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build precompiled C++ x86_64 wheels (cp39-cp313) in manylinux2014 (glibc 2.17+)
+        run: |
+          mkdir -p wheelhouse
+          docker run --rm \
+            -v "${PWD}:/workspace:ro" \
+            -v "${PWD}/wheelhouse:/out" \
+            quay.io/pypa/manylinux2014_x86_64:latest \
+            bash -euxc '
+              g++ --version
+              mkdir -p /tmp/src
+              cp -a /workspace/CMakeLists.txt /workspace/LICENSE /workspace/README.md /workspace/pyproject.toml \
+                    /workspace/include /workspace/src /workspace/python /workspace/tests /tmp/src/
+              for PY_DIR in /opt/python/cp39-cp39 /opt/python/cp310-cp310 /opt/python/cp311-cp311 /opt/python/cp312-cp312 /opt/python/cp313-cp313; do
+                if [[ -x "${PY_DIR}/bin/python" ]]; then
+                  mkdir -p /tmp/raw
+                  "${PY_DIR}/bin/pip" wheel /tmp/src --no-deps -w /tmp/raw
+                  auditwheel repair /tmp/raw/lgbm_boost-*.whl --plat manylinux2014_x86_64 -w /out
+                  rm -rf /tmp/raw
+                fi
+              done
+              ls -lh /out
+            '
+
+      - name: Build cp314 Linux x86_64 wheel with cibuildwheel
+        uses: pypa/cibuildwheel@v4.3.5
+        env:
+          CIBW_BUILD: "cp314-manylinux_x86_64"
+          CIBW_ARCHS: "x86_64"
+
+      - name: Verify zero-build binary wheel install on clean Oracle Linux 8 & 9 (no gcc/cmake)
+        run: |
+          docker run --rm \
+            -v "${PWD}/wheelhouse:/wheels:ro" \
+            -v "${PWD}/tests/test_wheel_smoke.py:/tmp/test_wheel_smoke.py:ro" \
+            oraclelinux:8 \
+            bash -euxc '
+              dnf install -y python39 python39-pip python3.11 python3.11-pip python3.12 python3.12-pip
+              for PY in /usr/bin/python3.9 /usr/bin/python3.11 /usr/bin/python3.12; do
+                "${PY}" -m pip install --only-binary=lgbm-boost --find-links=/wheels lgbm-boost numpy pytest
+                "${PY}" -m pytest /tmp/test_wheel_smoke.py -v
+              done
+            '
+
+          docker run --rm \
+            -v "${PWD}/wheelhouse:/wheels:ro" \
+            -v "${PWD}/tests/test_wheel_smoke.py:/tmp/test_wheel_smoke.py:ro" \
+            oraclelinux:9 \
+            bash -euxc '
+              dnf install -y python3 python3-pip python3.11 python3.11-pip python3.12 python3.12-pip
+              for PY in /usr/bin/python3 /usr/bin/python3.11 /usr/bin/python3.12; do
+                "${PY}" -m pip install --only-binary=lgbm-boost --find-links=/wheels lgbm-boost numpy pytest
+                "${PY}" -m pytest /tmp/test_wheel_smoke.py -v
+              done
+            '
+
+      - name: Upload Linux x86_64 wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-linux-x86_64
+          path: ./wheelhouse/*manylinux*.whl
+
   build_wheels:
     name: Build wheels (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -17,8 +87,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            archs: x86_64
           - os: ubuntu-24.04-arm
             archs: aarch64
           - os: macos-latest
@@ -43,48 +111,6 @@ jobs:
           name: cibw-wheels-${{ matrix.os }}
           path: ./wheelhouse/*.whl
 
-  build_oracle_linux:
-    name: Build x86_64 RPM & WHL (${{ matrix.ol }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - ol: ol8
-            image: oraclelinux:8
-          - ol: ol9
-            image: oraclelinux:9
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Build and test x86_64 wheels & RPMs in ${{ matrix.image }}
-        run: |
-          mkdir -p out_${{ matrix.ol }}
-          docker run --rm \
-            -v "${PWD}:/workspace:ro" \
-            -v "${PWD}/out_${{ matrix.ol }}:/out" \
-            ${{ matrix.image }} \
-            bash /workspace/packaging/rpm/build_ol_packages.sh ${{ matrix.ol }} /workspace /out
-
-      - name: Upload Python 3.9 manylinux_2_28 wheel from OL8 for PyPI
-        if: matrix.ol == 'ol8'
-        uses: actions/upload-artifact@v7
-        with:
-          name: cibw-wheels-ol8-cp39
-          path: out_ol8/wheels/*-cp39-cp39-*.whl
-
-      - name: Upload ${{ matrix.ol }} RPM and WHL artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: oracle-linux-${{ matrix.ol }}-x86_64
-          path: |
-            out_${{ matrix.ol }}/rpms/*.rpm
-            out_${{ matrix.ol }}/wheels/*.whl
-
   build_sdist:
     name: Build source distribution (sdist)
     runs-on: ubuntu-latest
@@ -105,7 +131,7 @@ jobs:
 
   publish_pypi:
     name: Publish wheels and sdist to PyPI
-    needs: [build_wheels, build_oracle_linux, build_sdist]
+    needs: [build_linux_x86_64_wheels, build_wheels, build_sdist]
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch'
@@ -118,7 +144,7 @@ jobs:
       id-token: write
 
     steps:
-      - name: Download PyPI distributions
+      - name: Download all built distributions
         uses: actions/download-artifact@v8
         with:
           pattern: cibw-*
@@ -131,8 +157,8 @@ jobs:
           skip-existing: true
 
   upload_github_release:
-    name: Attach WHL & OL8/OL9 RPM artifacts to GitHub Release
-    needs: [build_wheels, build_oracle_linux, build_sdist]
+    name: Attach precompiled WHL & sdist to GitHub Release
+    needs: [build_linux_x86_64_wheels, build_wheels, build_sdist]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -142,29 +168,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Download standard wheels and sdist
+      - name: Download wheels and sdist
         uses: actions/download-artifact@v8
         with:
           pattern: cibw-*
           path: release_assets
           merge-multiple: true
 
-      - name: Download Oracle Linux 8 & 9 RPMs and wheels
-        uses: actions/download-artifact@v8
-        with:
-          pattern: oracle-linux-*
-          path: ol_assets
-          merge-multiple: false
-
-      - name: Consolidate release assets and upload to GitHub Release
+      - name: Upload WHL and sdist assets to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          find ol_assets -name "*.rpm" -exec cp -v {} release_assets/ \;
-          find ol_assets -name "*manylinux_2_34_x86_64.whl" -exec cp -v {} release_assets/ \;
+          rm -f release_assets/*musllinux*.whl
           ls -lh release_assets/
-
           if ! gh release view "${TAG_NAME}" >/dev/null 2>&1; then
             gh release create "${TAG_NAME}" --title "${TAG_NAME}" --generate-notes
           fi
