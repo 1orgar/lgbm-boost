@@ -30,18 +30,29 @@ Stock `LightGBM` evaluates trees row-by-row via pointer-chasing across multiple 
 
 ## Benchmarks
 
-Measured on a `1,000`-tree, `100`-feature binary classification ensemble (`5% NaN` rate) against `lightgbm 4.7.0`. Even the baseline portable `scalar` target achieves **2.3x–5.5x** speedup; native `x86_64` `AVX2` and `AVX-512` CPUs add further vector gains on top:
+Measured on a `1,000`-tree, `100`-feature binary classification ensemble (`5% NaN` rate) against `lightgbm 4.7.0`.
+
+### Linux `x86_64` (`AVX-512`)
+
+| `num_leaves` | Rows (`N`) | Input Type | Threads | LightGBM (ms) | `lgbm-boost` (ms) | Speedup | Max Abs Diff |
+| :---: | ---: | :---: | :---: | ---: | ---: | :---: | :---: |
+| **31** | 1,000 | `ndarray float32` | 8 | 15.57 | **2.02** | **7.69x** | `1.12e-07` |
+| **31** | 10,000 | `ndarray float32` | 1 | 467.09 | **62.60** | **7.46x** | `1.60e-07` |
+| **31** | 100,000 | `ndarray float32` | 1 | 4,652.96 | **625.44** | **7.44x** | `1.61e-07` |
+| **31** | 100,000 | `ndarray float32` | 8 | 1,356.72 | **194.74** | **6.97x** | `1.61e-07` |
+| **31** | 100,000 | `pandas.DataFrame` | 8 | 1,374.67 | **196.36** | **7.00x** | `1.61e-07` |
+| **63** | 1,000 | `ndarray float32` | 1 | 75.02 | **15.19** | **4.94x** | `1.44e-07` |
+| **63** | 100,000 | `ndarray float32` | 1 | 7,489.82 | **1,525.04** | **4.91x** | `2.03e-07` |
+| **63** | 100,000 | `pandas.DataFrame` | 8 | 2,127.35 | **562.37** | **3.78x** | `2.03e-07` |
+
+### Apple Silicon `arm64` (`Scalar` target)
 
 | `num_leaves` | Rows (`N`) | Input Type | Threads | LightGBM (ms) | `lgbm-boost` (ms) | Speedup | Max Abs Diff |
 | :---: | ---: | :---: | :---: | ---: | ---: | :---: | :---: |
 | **31** | 1,000 | `ndarray float32` | 1 | 35.82 | **6.46** | **5.55x** | `1.12e-07` |
-| **31** | 10,000 | `ndarray float32` | 8 | 55.76 | **10.87** | **5.13x** | `1.42e-07` |
 | **31** | 100,000 | `ndarray float32` | 8 | 539.18 | **106.47** | **5.06x** | `1.59e-07` |
-| **31** | 500,000 | `ndarray float32` | 1 | 16,484.46 | **3,170.56** | **5.20x** | `1.70e-07` |
 | **31** | 500,000 | `pandas.DataFrame` | 8 | 2,802.03 | **575.82** | **4.87x** | `1.70e-07` |
 | **63** | 100,000 | `ndarray float32` | 1 | 5,621.73 | **1,428.87** | **3.93x** | `1.92e-07` |
-| **63** | 500,000 | `pandas.DataFrame` | 8 | 4,523.71 | **1,501.59** | **3.01x** | `1.96e-07` |
-| **127** | 100,000 | `ndarray float32` | 8 | 1,429.84 | **614.87** | **2.33x** | `7.76e-07` |
 | **127** | 500,000 | `pandas.DataFrame` | 8 | 7,338.70 | **3,201.17** | **2.29x** | `9.88e-07` |
 
 ---
