@@ -1,8 +1,7 @@
 %global debug_package %{nil}
 %global _build_id_links none
 %global __os_install_post %{nil}
-%global __pythondist_requires %{nil}
-%undefine __pythondist_requires
+%global __requires_exclude ^python.*dist\\(
 
 Name:           %{py_pkg_prefix}-lgbm-boost
 Version:        %{pkg_version}
