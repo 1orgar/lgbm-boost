@@ -1,0 +1,86 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "lgbm-boost"
+version = "0.1.0"
+description = "High-throughput SIMD batch inference engine for LightGBM models (V-QuickScorer & Tiled Branchless AVX2/AVX-512)"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Kirill Sholokhov" },
+]
+requires-python = ">=3.10"
+keywords = [
+    "lightgbm",
+    "gbdt",
+    "inference",
+    "scoring",
+    "simd",
+    "avx2",
+    "avx512",
+    "quickscorer",
+    "machine-learning",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.urls]
+Homepage = "https://github.com/1orgar/lgbm-boost"
+Repository = "https://github.com/1orgar/lgbm-boost"
+Issues = "https://github.com/1orgar/lgbm-boost/issues"
+Releases = "https://github.com/1orgar/lgbm-boost/releases"
+
+[project.optional-dependencies]
+dev = [
+    "lightgbm>=4.0",
+    "pandas>=2.0",
+    "scikit-learn>=1.3",
+    "pytest>=8.0",
+    "hypothesis>=6.0",
+]
+
+[tool.scikit-build]
+wheel.packages = ["python/lgbm_boost"]
+cmake.build-type = "Release"
+minimum-version = "build-system.requires"
+sdist.include = [
+    "CMakeLists.txt",
+    "LICENSE",
+    "README.md",
+    "include/**",
+    "src/**",
+    "python/**",
+    "fork_integration/**",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-*"
+skip = "pp* *-musllinux* *-win32 *-*linux_i686 cp3??t-*"
+test-requires = ["pytest>=8.0", "numpy>=1.24"]
+test-command = "pytest {project}/tests/test_wheel_smoke.py -v"
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"

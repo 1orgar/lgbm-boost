@@ -1,0 +1,13 @@
+.venv/
+build/
+build_*/
+dist/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.hypothesis/
+*.so
+*.dylib
+*.o
+.DS_Store
+benchmarks/results/

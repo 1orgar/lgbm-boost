@@ -1,0 +1,22 @@
+# Native x86_64 Linux container for building, testing, and benchmarking AVX2 & AVX-512 kernels
+# Usage on an x86_64 Xeon/EPYC machine (or --platform=linux/amd64):
+#   docker build --platform=linux/amd64 -f docker/Dockerfile.x86_64 -t lgbm-boost-x86 .
+#   docker run --rm --platform=linux/amd64 lgbm-boost-x86
+
+FROM --platform=linux/amd64 python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    ninja-build \
+    libgomp1 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+COPY . /workspace
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir ".[dev]" --no-build-isolation || pip install --no-cache-dir ".[dev]"
+
+CMD ["bash", "-c", "pytest -v && python benchmarks/run_suite.py --rows 1000 10000 100000 --repeats 5"]
